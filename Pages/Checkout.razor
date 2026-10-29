@@ -1,4 +1,5 @@
 @page "/checkout"
+@using Microsoft.AspNetCore.Components.Forms
 @inject OrderState OrderState
 @inject HttpClient HttpClient
 @inject NavigationManager NavigationManager
@@ -7,6 +8,7 @@
     <div class="checkout-cols">
         <div class="checkout-order-details">
             <h4>Review order</h4>
+
             @foreach (var pizza in Order.Pizzas)
             {
                 <p>
@@ -25,24 +27,97 @@
                 </strong>
             </p>
         </div>
-    </div>
 
-    <button class="checkout-button btn btn-warning" @onclick="PlaceOrder" disabled=@isSubmitting>
-      Place order
-    </button>
+        <div class="checkout-delivery-address">
+            <h4>Deliver to...</h4>
+
+            <EditForm EditContext="editContext"
+                      OnValidSubmit="PlaceOrder"
+                      OnInvalidSubmit="ShowError">
+                <DataAnnotationsValidator />
+
+                <AddressEditor Address="Order.DeliveryAddress" />
+
+                @if (isError)
+                {
+                    <div class="alert alert-danger">
+                        Please correct the errors in the form.
+                    </div>
+                }
+
+                <button class="checkout-button btn btn-warning"
+                        type="submit"
+                        disabled="@(!isFormValid || isSubmitting)">
+                    Place order
+                </button>
+            </EditForm>
+        </div>
+    </div>
 </div>
 
 @code {
     Order Order => OrderState.Order;
+
     bool isSubmitting;
+    bool isError;
+    bool isFormValid;
+
+    EditContext editContext = default!;
+
+    protected override void OnInitialized()
+    {
+        editContext = new EditContext(Order.DeliveryAddress);
+        editContext.OnFieldChanged += HandleFieldChanged;
+        editContext.OnValidationStateChanged += HandleValidationStateChanged;
+
+        isFormValid = editContext.Validate();
+    }
+
+    void HandleFieldChanged(object? sender, FieldChangedEventArgs e)
+    {
+        isError = false;
+        editContext.Validate();
+    }
+
+    void HandleValidationStateChanged(object? sender, ValidationStateChangedEventArgs e)
+    {
+        isFormValid = !editContext.GetValidationMessages().Any();
+        StateHasChanged();
+    }
 
     async Task PlaceOrder()
     {
         isSubmitting = true;
-        var response = await HttpClient.PostAsJsonAsync(NavigationManager.BaseUri + "orders", OrderState.Order);
-        var newOrderId= await response.Content.ReadFromJsonAsync<int>();
-        OrderState.ResetOrder();
-        NavigationManager.NavigateTo($"myorders/{newOrderId}");
-    } 
+        isError = false;
 
+        try
+        {
+            var response = await HttpClient.PostAsJsonAsync(
+                NavigationManager.BaseUri + "orders",
+                OrderState.Order);
+
+            response.EnsureSuccessStatusCode();
+
+            var newOrderId =
+                await response.Content.ReadFromJsonAsync<int>();
+
+            OrderState.ResetOrder();
+            NavigationManager.NavigateTo($"myorders/{newOrderId}");
+        }
+        finally
+        {
+            isSubmitting = false;
+        }
+    }
+
+    void ShowError(EditContext editContext)
+    {
+        isError = true;
+    }
+
+    public void Dispose()
+    {
+        editContext.OnFieldChanged -= HandleFieldChanged;
+        editContext.OnValidationStateChanged -= HandleValidationStateChanged;
+    }
 }
